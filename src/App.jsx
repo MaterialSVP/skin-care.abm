@@ -569,13 +569,17 @@ export default function App() {
   const [mmmSeeds,            setMmmSeeds]            = useState({});
   const [scenarioQuery,       setScenarioQuery]       = useState("");
   const [scenarioLoading,     setScenarioLoading]     = useState(false);
+  const [layerMode,           setLayerMode]           = useState(false);
   const [activeScenario,      setActiveScenario]      = useState(null);
+  const [scenarioStack,       setScenarioStack]       = useState([]);
   const [primaryEffect,       setPrimaryEffect]       = useState(null);
   const [narrative,           setNarrative]           = useState("");
   const [insight,             setInsight]             = useState("");
   const [insightLoading,      setInsightLoading]      = useState(false);
   const [activeChart,         setActiveChart]         = useState("share");
   const [paramsSubTab,        setParamsSubTab]        = useState("params");
+  const [snapshots,           setSnapshots]           = useState([]);
+  const [showBranches,        setShowBranches]        = useState(false);
 
   const agentsRef       = useRef([]);
   const brandRef        = useRef({});
@@ -622,6 +626,7 @@ export default function App() {
     setChannelMods({}); channelRef.current = {};
     setMmmSeeds({}); mmmRef.current = {};
     setActiveScenario(null); setNarrative(""); setInsight(""); setPrimaryEffect(null);
+    setScenarioStack([]); setSnapshots([]);
   }, []);
 
   useEffect(() => { init(); }, []);
@@ -644,22 +649,61 @@ export default function App() {
     return () => clearInterval(intervalRef.current);
   }, [running, step]);
 
+  // ── Deep merge helpers for layered scenarios ────────────────────────────────
+  const mergeObj = (base, incoming) => {
+    if (!incoming || !Object.keys(incoming).length) return base;
+    const result = { ...base };
+    for (const [k, v] of Object.entries(incoming)) {
+      result[k] = (base[k] && typeof base[k] === "object" && !Array.isArray(base[k]))
+        ? { ...base[k], ...v }
+        : v;
+    }
+    return result;
+  };
+
   const handleScenario = async () => {
     if (!scenarioQuery.trim()) return;
     setScenarioLoading(true); setRunning(false);
     const stats  = getStats(agentsRef.current);
     const result = await interpretScenario(scenarioQuery, stats, tickRef.current);
-    setBrandMods(result.brandModifiers || {}); brandRef.current = result.brandModifiers || {};
-    setCategoryMods(result.categoryModifiers || {}); categoryRef.current = result.categoryModifiers || {};
-    const newPE = result.priceEvents || [];
-    const newAE = result.availabilityEvents || [];
-    const newCM = result.channelMods || {};
-    const newMS = result.mmmSeeds || {};
-    setPriceEvents(newPE); priceRef.current = newPE;
-    setAvailabilityEvents(newAE); availRef.current = newAE;
-    setChannelMods(newCM); channelRef.current = newCM;
-    setMmmSeeds(newMS); mmmRef.current = newMS;
-    setActiveScenario(result.scenarioTitle || "Custom");
+    const title  = result.scenarioTitle || "Custom";
+
+    if (layerMode) {
+      // ── LAYER: deep-merge incoming params onto existing ──────────────────
+      const merged = {
+        brandMods:          mergeObj(brandRef.current,    result.brandModifiers   || {}),
+        categoryMods:       mergeObj(categoryRef.current, result.categoryModifiers || {}),
+        priceEvents:        [...priceRef.current,  ...(result.priceEvents        || [])],
+        availabilityEvents: [...availRef.current,  ...(result.availabilityEvents || [])],
+        channelMods:        mergeObj(channelRef.current,  result.channelMods      || {}),
+        mmmSeeds:           mergeObj(mmmRef.current,      result.mmmSeeds         || {}),
+      };
+      setBrandMods(merged.brandMods);           brandRef.current    = merged.brandMods;
+      setCategoryMods(merged.categoryMods);     categoryRef.current = merged.categoryMods;
+      setPriceEvents(merged.priceEvents);       priceRef.current    = merged.priceEvents;
+      setAvailabilityEvents(merged.availabilityEvents); availRef.current = merged.availabilityEvents;
+      setChannelMods(merged.channelMods);       channelRef.current  = merged.channelMods;
+      setMmmSeeds(merged.mmmSeeds);             mmmRef.current      = merged.mmmSeeds;
+      setScenarioStack(s => [...s, title]);
+      setActiveScenario(prev => prev ? `${prev} + ${title}` : title);
+    } else {
+      // ── REPLACE: wipe existing params and apply new ones ─────────────────
+      const newBM = result.brandModifiers   || {};
+      const newCM = result.categoryModifiers || {};
+      const newPE = result.priceEvents       || [];
+      const newAE = result.availabilityEvents || [];
+      const newCH = result.channelMods        || {};
+      const newMS = result.mmmSeeds           || {};
+      setBrandMods(newBM);           brandRef.current    = newBM;
+      setCategoryMods(newCM);        categoryRef.current = newCM;
+      setPriceEvents(newPE);         priceRef.current    = newPE;
+      setAvailabilityEvents(newAE);  availRef.current    = newAE;
+      setChannelMods(newCH);         channelRef.current  = newCH;
+      setMmmSeeds(newMS);            mmmRef.current      = newMS;
+      setScenarioStack([title]);
+      setActiveScenario(title);
+    }
+
     setNarrative(result.narrative || "");
     setPrimaryEffect(result.primaryEffect || "mixed");
     setScenarioQuery(""); setScenarioLoading(false);
@@ -678,6 +722,61 @@ export default function App() {
     setChannelMods({}); channelRef.current = {};
     setMmmSeeds({}); mmmRef.current = {};
     setActiveScenario(null); setNarrative(""); setInsight(""); setPrimaryEffect(null);
+    setScenarioStack([]);
+  };
+
+  // ── Snapshot helpers ───────────────────────────────────────────────────────
+  const saveSnapshot = () => {
+    const label = activeScenario
+      ? `Tick ${tickRef.current} — ${activeScenario}`
+      : `Tick ${tickRef.current} — Baseline`;
+    const snap = {
+      id:                 Date.now(),
+      label,
+      tick:               tickRef.current,
+      agents:             JSON.parse(JSON.stringify(agentsRef.current)),
+      socialMap:          socialRef.current,
+      history:            [...history],
+      brandMods:          { ...brandRef.current },
+      categoryMods:       { ...categoryRef.current },
+      priceEvents:        [...priceRef.current],
+      availabilityEvents: [...availRef.current],
+      channelMods:        { ...channelRef.current },
+      mmmSeeds:           { ...mmmRef.current },
+      activeScenario,
+      scenarioStack:      [...scenarioStack],
+      narrative,
+    };
+    setSnapshots(s => [...s, snap]);
+  };
+
+  const restoreSnapshot = (snap) => {
+    setRunning(false);
+    const restored = JSON.parse(JSON.stringify(snap.agents));
+    agentsRef.current = restored;
+    socialRef.current = snap.socialMap;
+    tickRef.current   = snap.tick;
+    brandRef.current          = snap.brandMods;
+    categoryRef.current       = snap.categoryMods;
+    priceRef.current          = snap.priceEvents;
+    availRef.current          = snap.availabilityEvents;
+    channelRef.current        = snap.channelMods;
+    mmmRef.current            = snap.mmmSeeds;
+    setAgents(restored);
+    setSocialMap(snap.socialMap);
+    setHistory(snap.history);
+    setTick(snap.tick);
+    setBrandMods(snap.brandMods);
+    setCategoryMods(snap.categoryMods);
+    setPriceEvents(snap.priceEvents);
+    setAvailabilityEvents(snap.availabilityEvents);
+    setChannelMods(snap.channelMods);
+    setMmmSeeds(snap.mmmSeeds);
+    setActiveScenario(snap.activeScenario);
+    setScenarioStack(snap.scenarioStack);
+    setNarrative(snap.narrative);
+    setPrimaryEffect(null);
+    setInsight("");
   };
 
   const currentStats = history[history.length - 1] || {};
@@ -751,7 +850,7 @@ export default function App() {
       {/* Header */}
       <div style={{padding:"24px 36px 18px",borderBottom:"1px solid #E0DDD6",background:"#FFFFFF",display:"flex",alignItems:"flex-end",justifyContent:"space-between"}}>
         <div>
-          <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#999",letterSpacing:".15em",marginBottom:5}}>MATERIAL+ INTELLIGENCE LAB · v5</div>
+          <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#999",letterSpacing:".15em",marginBottom:5}}>MATERIAL+ INTELLIGENCE LAB · v6</div>
           <h1 style={{fontSize:"clamp(18px,2.2vw,28px)",fontWeight:400,letterSpacing:"-.02em",lineHeight:1.1}}>
             Skincare Market<br/><span style={{fontStyle:"italic",color:"#C07A4A"}}>Consumer Simulation</span>
           </h1>
@@ -789,13 +888,60 @@ export default function App() {
             </button>
             <button onClick={step} disabled={running} style={{padding:"8px 16px",background:"transparent",color:running?"#CCC":"#555",border:"1px solid",borderColor:running?"#E0DDD6":"#B0ADA6",borderRadius:3,fontFamily:"'DM Mono',monospace",fontSize:10}}>STEP</button>
             <button onClick={()=>{setRunning(false);setTimeout(init,50)}} style={{padding:"8px 16px",background:"transparent",color:"#888",border:"1px solid #D8D5CE",borderRadius:3,fontFamily:"'DM Mono',monospace",fontSize:10}}>RESET</button>
+            <button onClick={saveSnapshot} style={{padding:"8px 14px",background:"transparent",color:"#2980B9",border:"1px solid #B0CEDD",borderRadius:3,fontFamily:"'DM Mono',monospace",fontSize:10}} title="Save current state as a branch point">
+              ⎇ SNAPSHOT
+            </button>
+            {snapshots.length > 0 && (
+              <button onClick={()=>setShowBranches(b=>!b)} style={{padding:"8px 10px",background:showBranches?"#E8F4FB":"transparent",color:"#2980B9",border:"1px solid #B0CEDD",borderRadius:3,fontFamily:"'DM Mono',monospace",fontSize:10}}>
+                {snapshots.length} BRANCH{snapshots.length>1?"ES":""}
+              </button>
+            )}
             {activeScenario && (
               <div style={{marginLeft:"auto",display:"flex",gap:8,alignItems:"center"}}>
-                <span style={{padding:"4px 10px",background:"#FDF5EE",border:`1px solid ${effectColors[primaryEffect]||"#C07A4A"}`,borderRadius:3,fontFamily:"'DM Mono',monospace",fontSize:9,color:effectColors[primaryEffect]||"#C07A4A"}}>⚡ {activeScenario}</span>
+                <span style={{padding:"4px 10px",background:"#FDF5EE",border:`1px solid ${effectColors[primaryEffect]||"#C07A4A"}`,borderRadius:3,fontFamily:"'DM Mono',monospace",fontSize:9,color:effectColors[primaryEffect]||"#C07A4A",maxWidth:260,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={activeScenario}>
+                  {scenarioStack.length > 1 ? `[${scenarioStack.length}] ` : ""}⚡ {activeScenario}
+                </span>
                 <button onClick={resetScenario} style={{padding:"4px 8px",background:"transparent",border:"1px solid #D8D5CE",borderRadius:3,color:"#888",fontSize:9,fontFamily:"'DM Mono',monospace"}}>✕</button>
               </div>
             )}
           </div>
+
+          {/* Branches panel */}
+          {showBranches && snapshots.length > 0 && (
+            <div className="fade" style={{marginBottom:16,padding:"12px 14px",background:"#EFF6FB",border:"1px solid #B0CEDD",borderRadius:4}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#2980B9",letterSpacing:".12em"}}>SAVED BRANCHES</div>
+                <button onClick={()=>setShowBranches(false)} style={{background:"transparent",border:"none",color:"#888",fontSize:11,cursor:"pointer",padding:0}}>✕</button>
+              </div>
+              <div style={{fontFamily:"'DM Sans',sans-serif",fontSize:10,color:"#5A8AA0",marginBottom:10,lineHeight:1.5}}>
+                Restore any branch to rewind the simulation to that exact state — agents, parameters, and history — then run new scenarios from that point.
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                {snapshots.map((snap, i) => (
+                  <div key={snap.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",background:"#FFFFFF",border:"1px solid #C8DDE8",borderRadius:4}}>
+                    <div style={{flex:1}}>
+                      <div style={{fontFamily:"'DM Sans',sans-serif",fontSize:11,color:"#1A3A4A",marginBottom:2}}>{snap.label}</div>
+                      <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#888"}}>
+                        {snap.agents.filter(a=>a.status==="active").length} active agents
+                        {snap.scenarioStack.length > 0 && ` · ${snap.scenarioStack.length} scenario${snap.scenarioStack.length>1?"s":""} applied`}
+                      </div>
+                    </div>
+                    <button
+                      onClick={()=>{ restoreSnapshot(snap); setShowBranches(false); }}
+                      style={{padding:"5px 12px",background:"#2980B9",color:"#FFFFFF",border:"none",borderRadius:3,fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:".08em",cursor:"pointer"}}
+                    >
+                      RESTORE
+                    </button>
+                    <button
+                      onClick={()=>setSnapshots(s=>s.filter((_,j)=>j!==i))}
+                      style={{padding:"5px 8px",background:"transparent",color:"#AAA",border:"1px solid #D8D5CE",borderRadius:3,fontSize:10,cursor:"pointer"}}
+                      title="Delete this branch"
+                    >✕</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Narrative */}
           {narrative && (
@@ -1203,13 +1349,48 @@ export default function App() {
 
           <textarea value={scenarioQuery} onChange={e=>setScenarioQuery(e.target.value)}
             onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();handleScenario();}}}
-            placeholder="e.g. Olay runs a 4-week 25% price promotion targeting mass tier value seekers…"
+            placeholder="e.g. Olay doubles TV broadcast spend to drive awareness in the mass tier…"
             rows={4}
             style={{width:"100%",padding:"11px",background:"#F7F6F3",border:"1px solid #D8D5CE",borderRadius:4,color:"#1A1A1A",fontFamily:"'DM Sans',sans-serif",fontSize:11,lineHeight:1.6,marginBottom:10}}
           />
+
+          {/* Layer mode toggle */}
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+            <div
+              onClick={()=>setLayerMode(l=>!l)}
+              style={{width:32,height:18,borderRadius:9,background:layerMode?"#2980B9":"#D8D5CE",position:"relative",cursor:"pointer",transition:"background .2s",flexShrink:0}}
+            >
+              <div style={{position:"absolute",top:2,left:layerMode?14:2,width:14,height:14,borderRadius:"50%",background:"#FFFFFF",transition:"left .2s"}}/>
+            </div>
+            <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:layerMode?"#2980B9":"#888",letterSpacing:".08em"}}>
+              {layerMode ? "LAYER ONTO CURRENT" : "REPLACE CURRENT"}
+            </span>
+          </div>
+          {layerMode && activeScenario && (
+            <div style={{marginBottom:10,padding:"6px 10px",background:"#E8F4FB",border:"1px solid #B0CEDD",borderRadius:3,fontFamily:"'DM Sans',sans-serif",fontSize:10,color:"#1A5276"}}>
+              New scenario will be added on top of: <em>{activeScenario}</em>
+            </div>
+          )}
+
           <button onClick={handleScenario} disabled={scenarioLoading||!scenarioQuery.trim()} style={{width:"100%",padding:"10px",background:scenarioLoading||!scenarioQuery.trim()?"#EAE8E2":"#C07A4A",color:scenarioLoading||!scenarioQuery.trim()?"#AAA":"#FFFFFF",border:"none",borderRadius:3,fontFamily:"'DM Mono',monospace",fontSize:10,letterSpacing:".1em",fontWeight:500,marginBottom:18}}>
-            {scenarioLoading?<span className="pulse">INTERPRETING…</span>:"APPLY SCENARIO →"}
+            {scenarioLoading
+              ? <span className="pulse">INTERPRETING…</span>
+              : layerMode ? "LAYER SCENARIO →" : "APPLY SCENARIO →"
+            }
           </button>
+
+          {/* Active scenario stack */}
+          {scenarioStack.length > 1 && (
+            <div className="fade" style={{marginBottom:14,padding:"10px 12px",background:"#FDF5EE",border:"1px solid #E8C8A0",borderRadius:4}}>
+              <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#C07A4A",letterSpacing:".12em",marginBottom:6}}>ACTIVE SCENARIO STACK</div>
+              {scenarioStack.map((s,i) => (
+                <div key={i} style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
+                  <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#C07A4A",width:14}}>{i+1}.</div>
+                  <div style={{fontFamily:"'DM Sans',sans-serif",fontSize:10,color:"#555"}}>{s}</div>
+                </div>
+              ))}
+            </div>
+          )}
 
           <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#BBB",letterSpacing:".12em",marginBottom:8}}>EXAMPLE SCENARIOS</div>
           <div style={{display:"flex",flexDirection:"column",gap:5,marginBottom:20}}>
