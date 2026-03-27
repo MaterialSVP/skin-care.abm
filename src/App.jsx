@@ -2,27 +2,36 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
 
 // ─── BRANDS ───────────────────────────────────────────────────────────────────
+// mmm: channel reach parameters derived from MMM share-of-effect norms
+//   broadcast : TV/OOH/display — passive exposure, boosts salience broadly (replaces bassP role)
+//   search    : paid search/retail media — lowers consideration threshold for in-market agents
+//   social    : paid social/creator — amplifies WOM contagion, segment-weighted
+// These three sum to the brand's total "advertising pressure" budget.
+// To seed from real MMM: supply {broadcast, search, social} as share-of-effect proportions;
+// the model scales them by the brand's total bassP budget.
 const BRANDS = [
-  { id: "olay",         name: "Olay",          color: "#E8A87C", tier: "mass",    equity: 0.72, price: 18, innovation: 0.60, distribution: 0.90, bassP: 0.025, bassQ: 0.38, satisfaction: 0.70 },
-  { id: "cerave",       name: "CeraVe",        color: "#7EB8C9", tier: "mass",    equity: 0.78, price: 16, innovation: 0.70, distribution: 0.88, bassP: 0.020, bassQ: 0.45, satisfaction: 0.82 },
-  { id: "neutrogena",   name: "Neutrogena",    color: "#F2C94C", tier: "mass",    equity: 0.68, price: 15, innovation: 0.55, distribution: 0.92, bassP: 0.030, bassQ: 0.35, satisfaction: 0.68 },
-  { id: "lorealparis",  name: "L'Oréal Paris", color: "#BB6BD9", tier: "mass",    equity: 0.70, price: 22, innovation: 0.65, distribution: 0.85, bassP: 0.022, bassQ: 0.36, satisfaction: 0.71 },
-  { id: "aveeno",       name: "Aveeno",        color: "#A8C69F", tier: "mass",    equity: 0.65, price: 17, innovation: 0.50, distribution: 0.82, bassP: 0.018, bassQ: 0.30, satisfaction: 0.67 },
-  { id: "clinique",     name: "Clinique",      color: "#56CCF2", tier: "prestige",equity: 0.80, price: 45, innovation: 0.72, distribution: 0.60, bassP: 0.015, bassQ: 0.32, satisfaction: 0.78 },
-  { id: "estee",        name: "Estée Lauder",  color: "#F2994A", tier: "prestige",equity: 0.85, price: 65, innovation: 0.75, distribution: 0.50, bassP: 0.012, bassQ: 0.28, satisfaction: 0.80 },
-  { id: "skinceuticals",name: "SkinCeuticals", color: "#EB5757", tier: "prestige",equity: 0.88, price: 80, innovation: 0.90, distribution: 0.40, bassP: 0.010, bassQ: 0.42, satisfaction: 0.88 },
-  { id: "cetaphil",     name: "Cetaphil",      color: "#6FCF97", tier: "mass",    equity: 0.62, price: 14, innovation: 0.40, distribution: 0.87, bassP: 0.020, bassQ: 0.28, satisfaction: 0.72 },
-  { id: "tatcha",       name: "Tatcha",        color: "#9B51E0", tier: "luxury",  equity: 0.82, price: 95, innovation: 0.80, distribution: 0.30, bassP: 0.008, bassQ: 0.50, satisfaction: 0.85 },
+  { id: "olay",         name: "Olay",          color: "#E8A87C", tier: "mass",    equity: 0.72, price: 18, innovation: 0.60, distribution: 0.90, bassP: 0.025, bassQ: 0.38, satisfaction: 0.70, mmm: { broadcast: 0.014, search: 0.006, social: 0.005 } },
+  { id: "cerave",       name: "CeraVe",        color: "#7EB8C9", tier: "mass",    equity: 0.78, price: 16, innovation: 0.70, distribution: 0.88, bassP: 0.020, bassQ: 0.45, satisfaction: 0.82, mmm: { broadcast: 0.008, search: 0.006, social: 0.006 } },
+  { id: "neutrogena",   name: "Neutrogena",    color: "#F2C94C", tier: "mass",    equity: 0.68, price: 15, innovation: 0.55, distribution: 0.92, bassP: 0.030, bassQ: 0.35, satisfaction: 0.68, mmm: { broadcast: 0.018, search: 0.007, social: 0.005 } },
+  { id: "lorealparis",  name: "L'Oréal Paris", color: "#BB6BD9", tier: "mass",    equity: 0.70, price: 22, innovation: 0.65, distribution: 0.85, bassP: 0.022, bassQ: 0.36, satisfaction: 0.71, mmm: { broadcast: 0.012, search: 0.005, social: 0.005 } },
+  { id: "aveeno",       name: "Aveeno",        color: "#A8C69F", tier: "mass",    equity: 0.65, price: 17, innovation: 0.50, distribution: 0.82, bassP: 0.018, bassQ: 0.30, satisfaction: 0.67, mmm: { broadcast: 0.010, search: 0.004, social: 0.004 } },
+  { id: "clinique",     name: "Clinique",      color: "#56CCF2", tier: "prestige",equity: 0.80, price: 45, innovation: 0.72, distribution: 0.60, bassP: 0.015, bassQ: 0.32, satisfaction: 0.78, mmm: { broadcast: 0.005, search: 0.006, social: 0.004 } },
+  { id: "estee",        name: "Estée Lauder",  color: "#F2994A", tier: "prestige",equity: 0.85, price: 65, innovation: 0.75, distribution: 0.50, bassP: 0.012, bassQ: 0.28, satisfaction: 0.80, mmm: { broadcast: 0.004, search: 0.005, social: 0.003 } },
+  { id: "skinceuticals",name: "SkinCeuticals", color: "#EB5757", tier: "prestige",equity: 0.88, price: 80, innovation: 0.90, distribution: 0.40, bassP: 0.010, bassQ: 0.42, satisfaction: 0.88, mmm: { broadcast: 0.002, search: 0.004, social: 0.004 } },
+  { id: "cetaphil",     name: "Cetaphil",      color: "#6FCF97", tier: "mass",    equity: 0.62, price: 14, innovation: 0.40, distribution: 0.87, bassP: 0.020, bassQ: 0.28, satisfaction: 0.72, mmm: { broadcast: 0.011, search: 0.005, social: 0.004 } },
+  { id: "tatcha",       name: "Tatcha",        color: "#9B51E0", tier: "luxury",  equity: 0.82, price: 95, innovation: 0.80, distribution: 0.30, bassP: 0.008, bassQ: 0.50, satisfaction: 0.85, mmm: { broadcast: 0.001, search: 0.002, social: 0.005 } },
 ];
 
 // ─── SEGMENTS ─────────────────────────────────────────────────────────────────
+// socialReceptivity: multiplier on paid social channel reach (1.0 = average)
+// Higher = segment responds more strongly to creator/influencer content
 const SEGMENTS = [
-  { id: "budget_basics",    label: "Budget Basics",    share: 0.22, priceWeight: 0.50, equityWeight: 0.20, innovWeight: 0.10, distWeight: 0.20, socialWeight: 0.30, loyaltyRate: 0.55, tierAffinity: "mass",    salienceDecay: 0.12, considerationThreshold: 0.25, experienceWeight: 0.5 },
-  { id: "value_seekers",    label: "Value Seekers",    share: 0.18, priceWeight: 0.30, equityWeight: 0.30, innovWeight: 0.20, distWeight: 0.20, socialWeight: 0.40, loyaltyRate: 0.50, tierAffinity: "mass",    salienceDecay: 0.14, considerationThreshold: 0.28, experienceWeight: 0.6 },
-  { id: "ingredient_nerds", label: "Ingredient Nerds", share: 0.15, priceWeight: 0.10, equityWeight: 0.20, innovWeight: 0.50, distWeight: 0.10, socialWeight: 0.20, loyaltyRate: 0.60, tierAffinity: "prestige",salienceDecay: 0.08, considerationThreshold: 0.35, experienceWeight: 0.7 },
-  { id: "brand_loyalists",  label: "Brand Loyalists",  share: 0.20, priceWeight: 0.10, equityWeight: 0.50, innovWeight: 0.10, distWeight: 0.10, socialWeight: 0.30, loyaltyRate: 0.80, tierAffinity: "mass",    salienceDecay: 0.04, considerationThreshold: 0.20, experienceWeight: 0.4 },
-  { id: "prestige_seekers", label: "Prestige Seekers", share: 0.13, priceWeight:-0.10, equityWeight: 0.40, innovWeight: 0.20, distWeight: 0.10, socialWeight: 0.40, loyaltyRate: 0.65, tierAffinity: "luxury",  salienceDecay: 0.10, considerationThreshold: 0.32, experienceWeight: 0.6 },
-  { id: "naturals",         label: "Clean & Natural",  share: 0.12, priceWeight: 0.15, equityWeight: 0.20, innovWeight: 0.30, distWeight: 0.10, socialWeight: 0.50, loyaltyRate: 0.55, tierAffinity: "mass",    salienceDecay: 0.11, considerationThreshold: 0.30, experienceWeight: 0.65 },
+  { id: "budget_basics",    label: "Budget Basics",    share: 0.22, priceWeight: 0.50, equityWeight: 0.20, innovWeight: 0.10, distWeight: 0.20, socialWeight: 0.30, loyaltyRate: 0.55, tierAffinity: "mass",    salienceDecay: 0.12, considerationThreshold: 0.25, experienceWeight: 0.5,  socialReceptivity: 0.7 },
+  { id: "value_seekers",    label: "Value Seekers",    share: 0.18, priceWeight: 0.30, equityWeight: 0.30, innovWeight: 0.20, distWeight: 0.20, socialWeight: 0.40, loyaltyRate: 0.50, tierAffinity: "mass",    salienceDecay: 0.14, considerationThreshold: 0.28, experienceWeight: 0.6,  socialReceptivity: 1.1 },
+  { id: "ingredient_nerds", label: "Ingredient Nerds", share: 0.15, priceWeight: 0.10, equityWeight: 0.20, innovWeight: 0.50, distWeight: 0.10, socialWeight: 0.20, loyaltyRate: 0.60, tierAffinity: "prestige",salienceDecay: 0.08, considerationThreshold: 0.35, experienceWeight: 0.7,  socialReceptivity: 1.4 },
+  { id: "brand_loyalists",  label: "Brand Loyalists",  share: 0.20, priceWeight: 0.10, equityWeight: 0.50, innovWeight: 0.10, distWeight: 0.10, socialWeight: 0.30, loyaltyRate: 0.80, tierAffinity: "mass",    salienceDecay: 0.04, considerationThreshold: 0.20, experienceWeight: 0.4,  socialReceptivity: 0.5 },
+  { id: "prestige_seekers", label: "Prestige Seekers", share: 0.13, priceWeight:-0.10, equityWeight: 0.40, innovWeight: 0.20, distWeight: 0.10, socialWeight: 0.40, loyaltyRate: 0.65, tierAffinity: "luxury",  salienceDecay: 0.10, considerationThreshold: 0.32, experienceWeight: 0.6,  socialReceptivity: 1.3 },
+  { id: "naturals",         label: "Clean & Natural",  share: 0.12, priceWeight: 0.15, equityWeight: 0.20, innovWeight: 0.30, distWeight: 0.10, socialWeight: 0.50, loyaltyRate: 0.55, tierAffinity: "mass",    salienceDecay: 0.11, considerationThreshold: 0.30, experienceWeight: 0.65, socialReceptivity: 1.6 },
 ];
 
 // ─── TIERS ────────────────────────────────────────────────────────────────────
@@ -41,6 +50,33 @@ const MAX_PRICE     = 95; // normalisation denominator for price score
 // availabilityEvents: [{ brandId, startTick, endTick, availability }] 0-1
 //   availability < AVAIL_GATE removes brand from consideration set entirely
 const AVAIL_GATE = 0.20; // below this → brand excluded from consideration
+
+// ─── CHANNEL REACH HELPERS ────────────────────────────────────────────────────
+// Get effective channel reach for a brand, merging base mmm with any channelMods.
+// channelMods: { brandId: { broadcast, search, social } } — scenario overrides
+// MMM seeding: if a brand has mmmSeed = { broadcast: 0.40, search: 0.25, social: 0.35 }
+//   (share-of-effect proportions summing to 1.0), scale by brand's total bassP budget.
+function getChannelReach(brand, channelMods = {}, mmmSeeds = {}) {
+  const base = brand.mmm;
+  const mod  = channelMods[brand.id] || {};
+  const seed = mmmSeeds[brand.id];
+
+  if (seed) {
+    // Scale MMM proportions by total bassP budget
+    const total = brand.bassP;
+    return {
+      broadcast: (mod.broadcast ?? seed.broadcast) * total,
+      search:    (mod.search    ?? seed.search)    * total,
+      social:    (mod.social    ?? seed.social)    * total,
+    };
+  }
+
+  return {
+    broadcast: mod.broadcast ?? base.broadcast,
+    search:    mod.search    ?? base.search,
+    social:    mod.social    ?? base.social,
+  };
+}
 
 function getEffectivePrice(brandId, tick, basePrice, priceEvents) {
   const active = priceEvents.filter(e => e.brandId === brandId && tick >= e.startTick && tick <= e.endTick);
@@ -153,7 +189,7 @@ function buildSocialMap(agents) {
 }
 
 // ─── MAIN TICK ────────────────────────────────────────────────────────────────
-function simulateTick(agents, brandMods = {}, categoryMods = {}, socialMap = {}, tick = 0, priceEvents = [], availabilityEvents = []) {
+function simulateTick(agents, brandMods = {}, categoryMods = {}, socialMap = {}, tick = 0, priceEvents = [], availabilityEvents = [], channelMods = {}, mmmSeeds = {}) {
   const segMap   = Object.fromEntries(SEGMENTS.map(s => [s.id, s]));
   const brandMap = Object.fromEntries(BRANDS.map(b => [b.id, b]));
   const agentMap = Object.fromEntries(agents.map(a => [a.id, a]));
@@ -167,6 +203,9 @@ function simulateTick(agents, brandMods = {}, categoryMods = {}, socialMap = {},
   const effectiveAvailability = Object.fromEntries(BRANDS.map(b => [
     b.id, getEffectiveAvailability(b.id, tick, availabilityEvents)
   ]));
+
+  // Pre-compute channel reaches for this tick
+  const channelReach = Object.fromEntries(BRANDS.map(b => [b.id, getChannelReach(b, channelMods, mmmSeeds)]));
 
   const activeCounts = { mass: 0, prestige: 0, luxury: 0 };
   const totalByTier  = { mass: 0, prestige: 0, luxury: 0 };
@@ -206,12 +245,13 @@ function simulateTick(agents, brandMods = {}, categoryMods = {}, socialMap = {},
         }
       }
       for (const b of BRANDS) {
-        const p = brandMods[b.id]?.bassP ?? b.bassP;
-        if (!newAwareness.has(b.id) && Math.random() < p * 0.5) {
+        const ch = channelReach[b.id];
+        const broadcastP = ch.broadcast;
+        if (!newAwareness.has(b.id) && Math.random() < broadcastP * 0.5) {
           newAwareness.add(b.id); newSalience[b.id] = 0.12;
           agent.experience[b.id] = b.equity; agent.purchaseCount[b.id] = 0;
         } else if (newAwareness.has(b.id)) {
-          newSalience[b.id] = Math.min(1, (newSalience[b.id] || 0) + p * 0.15);
+          newSalience[b.id] = Math.min(1, (newSalience[b.id] || 0) + broadcastP * 0.15);
         }
       }
 
@@ -241,59 +281,72 @@ function simulateTick(agents, brandMods = {}, categoryMods = {}, socialMap = {},
       return { ...agent, status: "latent", tier: currentTier, brand: null, loyalty: 0 };
     }
 
-    // ── LAYER 2: Bass awareness + salience dynamics ───────────────────────────
+    // ── LAYER 2: Channel-decomposed awareness + salience dynamics ─────────────
     const newSalience     = { ...agent.salience };
     const newAwareness    = new Set(agent.awareness);
     const newExperience   = { ...agent.experience };
     const newPurchaseCount = { ...agent.purchaseCount };
 
+    // Salience decay — segment-specific forgetting
     for (const bid of Object.keys(newSalience)) {
       if (bid !== agent.brand) {
         newSalience[bid] = Math.max(0, (newSalience[bid] || 0) - seg.salienceDecay * 0.1);
       }
     }
 
+    // Broadcast channel (TV/OOH/display) — passive, broad reach
+    // Boosts salience for all aware agents; small chance of new awareness
     for (const b of BRANDS) {
-      const bMod = brandMods[b.id] || {};
-      const p    = bMod.bassP ?? b.bassP;
+      const ch = channelReach[b.id];
+      const broadcast = ch.broadcast;
       if (newAwareness.has(b.id)) {
-        newSalience[b.id] = Math.min(1, (newSalience[b.id] || 0) + p * 0.25);
-      } else if (Math.random() < p * 0.3) {
+        newSalience[b.id] = Math.min(1, (newSalience[b.id] || 0) + broadcast * 0.25);
+      } else if (Math.random() < broadcast * 0.3) {
         newAwareness.add(b.id); newSalience[b.id] = 0.15;
         newExperience[b.id] = b.equity; newPurchaseCount[b.id] = 0;
       }
     }
 
+    // Social channel (paid social/creator) — WOM amplifier, segment-weighted
+    // Operates like bassQ but driven by paid spend and segment receptivity
     for (const nId of (socialMap[agent.id] || [])) {
       const nb = agentMap[nId];
       if (nb?.status === "active" && nb.brand) {
-        const b = brandMap[nb.brand];
+        const b  = brandMap[nb.brand];
         if (b) {
-          const q = bMod_q(b, brandMods);
-          if (!newAwareness.has(b.id) && Math.random() < q * 0.03) {
+          const ch           = channelReach[b.id];
+          const organicQ     = bMod_q(b, brandMods);
+          // Paid social amplifies organic WOM by segment receptivity
+          const effectiveQ   = organicQ + ch.social * seg.socialReceptivity;
+          if (!newAwareness.has(b.id) && Math.random() < effectiveQ * 0.03) {
             newAwareness.add(b.id); newSalience[b.id] = 0.18;
             newExperience[b.id] = b.equity; newPurchaseCount[b.id] = 0;
           } else if (newAwareness.has(b.id)) {
-            newSalience[b.id] = Math.min(1, (newSalience[b.id] || 0) + q * 0.03);
+            newSalience[b.id] = Math.min(1, (newSalience[b.id] || 0) + effectiveQ * 0.03);
           }
         }
       }
     }
 
+    // Experience boosts salience for current brand
     if (agent.brand && newExperience[agent.brand] != null) {
       const expBoost = newExperience[agent.brand] * 0.15;
       newSalience[agent.brand] = Math.min(1, (newSalience[agent.brand] || 0.5) + expBoost);
     }
 
-    // ── LAYER 3: Consideration set — with availability gate ───────────────────
+    // ── LAYER 3: Consideration set — search channel lowers threshold + availability gate
+    // Search/retail media: in-market agents are more likely to consider a brand
+    // they've been exposed to via search. Modelled as a per-brand threshold reduction.
     const awarenessArr = [...newAwareness];
     const considerationSet = BRANDS.filter(b => {
       if (!awarenessArr.includes(b.id)) return false;
-      // Hard availability gate: stockout removes brand from consideration set
       if (effectiveAvailability[b.id] < AVAIL_GATE) return false;
       const sal       = newSalience[b.id] || 0;
       const purchases = newPurchaseCount[b.id] || 0;
-      const threshold = seg.considerationThreshold * Math.max(0.5, 1 - purchases * 0.08);
+      const baseThreshold = seg.considerationThreshold * Math.max(0.5, 1 - purchases * 0.08);
+      // Search reach reduces threshold — active agents are more findable via intent channels
+      const searchNudge   = channelReach[b.id].search * 2.0;
+      const threshold     = Math.max(0.05, baseThreshold - searchNudge);
       return sal >= threshold;
     });
 
@@ -419,17 +472,33 @@ Tiers: mass, prestige, luxury
 BASE PRICES (for reference when setting price events):
 olay:$18, cerave:$16, neutrogena:$15, lorealparis:$22, aveeno:$17, clinique:$45, estee:$65, skinceuticals:$80, cetaphil:$14, tatcha:$95
 
-You can adjust FIVE parameter types:
+You can adjust SIX parameter types:
 1. brandModifiers — persistent brand attribute changes: equity(0-1), innovation(0-1), distribution(0-1), bassP(0-0.1), bassQ(0-0.8), satisfaction(0-1)
    NOTE: Do NOT include price in brandModifiers — use priceEvents instead.
 2. categoryModifiers — entryRate/exitRate per tier
-3. priceEvents — time-limited price changes: [{brandId, startTick, endTick, modifier}]
+3. priceEvents — time-limited price changes: [{brandId, startTick, endTick, modifier, label}]
    modifier multiplies base price: 0.80 = 20% discount, 1.20 = 20% increase
-   Events should span realistic durations (e.g. a 4-week promo = 4 ticks)
-4. availabilityEvents — time-limited availability changes: [{brandId, startTick, endTick, availability}]
-   availability 0-1: 0 = full stockout (removed from consideration), 0.5 = partial/constrained
-   Gate threshold is 0.20 — below this the brand is excluded from consideration sets entirely
-5. brand satisfaction — set in brandModifiers to drive experience update dynamics
+4. availabilityEvents — time-limited availability changes: [{brandId, startTick, endTick, availability, label}]
+   availability 0-1: 0 = full stockout (removed from consideration), gate threshold is 0.20
+5. channelMods — override a brand's channel reach values: { brandId: { broadcast, search, social } }
+   broadcast: TV/OOH/display — raises salience broadly (0.001–0.025 range)
+   search: paid search/retail media — lowers consideration threshold for in-market agents (0.001–0.010)
+   social: paid social/creator — amplifies WOM by segment receptivity (0.001–0.010)
+   Use channelMods when the scenario involves a media mix SHIFT (e.g. "doubles TV spend", "invests in search")
+6. mmmSeeds — seed channel parameters from MMM share-of-effect proportions:
+   { brandId: { broadcast: 0.0-1.0, search: 0.0-1.0, social: 0.0-1.0 } } — must sum to ~1.0
+   Use mmmSeeds when user provides actual MMM data ("our MMM shows TV drives 45% of sales")
+
+DEFAULT CHANNEL REACH (for reference when setting channelMods):
+olay: broadcast=0.014, search=0.006, social=0.005
+cerave: broadcast=0.008, search=0.006, social=0.006
+neutrogena: broadcast=0.018, search=0.007, social=0.005
+clinique: broadcast=0.005, search=0.006, social=0.004
+skinceuticals: broadcast=0.002, search=0.004, social=0.004
+tatcha: broadcast=0.001, search=0.002, social=0.005
+
+SEGMENT SOCIAL RECEPTIVITY (higher = more responsive to paid social):
+Clean & Natural: 1.6, Ingredient Nerds: 1.4, Prestige Seekers: 1.3, Value Seekers: 1.1, Budget Basics: 0.7, Brand Loyalists: 0.5
 
 Respond ONLY with valid JSON, no markdown:
 {
@@ -437,15 +506,20 @@ Respond ONLY with valid JSON, no markdown:
   "categoryModifiers": { "tier": { "entryRate":0-0.15, "exitRate":0-0.08 } },
   "priceEvents": [{ "brandId": "id", "startTick": N, "endTick": N, "modifier": 0.0-2.0, "label": "short description" }],
   "availabilityEvents": [{ "brandId": "id", "startTick": N, "endTick": N, "availability": 0.0-1.0, "label": "short description" }],
-  "narrative": "2-3 sentences covering brand dynamics, price/availability effects, and consideration set implications",
+  "channelMods": { "brandId": { "broadcast": N, "search": N, "social": N } },
+  "mmmSeeds": { "brandId": { "broadcast": 0-1, "search": 0-1, "social": 0-1 } },
+  "narrative": "2-3 sentences covering brand dynamics, channel effects, and consideration set implications",
   "scenarioTitle": "Max 5 words",
-  "primaryEffect": "share_shift" | "category_expansion" | "category_contraction" | "consideration_shift" | "price_event" | "mixed"
+  "primaryEffect": "share_shift" | "category_expansion" | "category_contraction" | "consideration_shift" | "price_event" | "channel_shift" | "mixed"
 }
 
 Only include affected brands/tiers/events. Be bold — changes must produce visible simulation effects.
+For TV/broadcast heavy scenarios: raise broadcast in channelMods (e.g. 2x the default value)
+For search investment: raise search in channelMods — this nudges brands into consideration sets of in-market agents
+For social/creator campaigns: raise social in channelMods — effect is amplified for Clean & Natural and Ingredient Nerds segments
+For MMM seeding: use mmmSeeds with proportions summing to 1.0 per brand
 For promotional pricing: use priceEvents with startTick=${currentTick}, endTick=${currentTick + 4}, modifier 0.70-0.85
-For stockouts: use availabilityEvents with availability 0.0, realistic duration 3-6 ticks
-For distribution gains: raise distribution in brandModifiers (persistent) AND optionally add bassP boost`,
+For stockouts: use availabilityEvents with availability 0.0, realistic duration 3-6 ticks`,
     messages: [{ role: "user", content: query }],
   });
 
@@ -491,6 +565,8 @@ export default function App() {
   const [categoryMods,        setCategoryMods]        = useState({});
   const [priceEvents,         setPriceEvents]         = useState([]);
   const [availabilityEvents,  setAvailabilityEvents]  = useState([]);
+  const [channelMods,         setChannelMods]         = useState({});
+  const [mmmSeeds,            setMmmSeeds]            = useState({});
   const [scenarioQuery,       setScenarioQuery]       = useState("");
   const [scenarioLoading,     setScenarioLoading]     = useState(false);
   const [activeScenario,      setActiveScenario]      = useState(null);
@@ -499,6 +575,7 @@ export default function App() {
   const [insight,             setInsight]             = useState("");
   const [insightLoading,      setInsightLoading]      = useState(false);
   const [activeChart,         setActiveChart]         = useState("share");
+  const [paramsSubTab,        setParamsSubTab]        = useState("params");
 
   const agentsRef       = useRef([]);
   const brandRef        = useRef({});
@@ -506,6 +583,8 @@ export default function App() {
   const socialRef       = useRef({});
   const priceRef        = useRef([]);
   const availRef        = useRef([]);
+  const channelRef      = useRef({});
+  const mmmRef          = useRef({});
   const tickRef         = useRef(0);
   const intervalRef     = useRef(null);
 
@@ -515,6 +594,8 @@ export default function App() {
   useEffect(() => { socialRef.current   = socialMap;          }, [socialMap]);
   useEffect(() => { priceRef.current    = priceEvents;        }, [priceEvents]);
   useEffect(() => { availRef.current    = availabilityEvents; }, [availabilityEvents]);
+  useEffect(() => { channelRef.current  = channelMods;        }, [channelMods]);
+  useEffect(() => { mmmRef.current      = mmmSeeds;           }, [mmmSeeds]);
 
   const buildHistoryEntry = (tick, s) => ({
     tick, ...s.share,
@@ -538,6 +619,8 @@ export default function App() {
     setCategoryMods({}); categoryRef.current = {};
     setPriceEvents([]); priceRef.current = [];
     setAvailabilityEvents([]); availRef.current = [];
+    setChannelMods({}); channelRef.current = {};
+    setMmmSeeds({}); mmmRef.current = {};
     setActiveScenario(null); setNarrative(""); setInsight(""); setPrimaryEffect(null);
   }, []);
 
@@ -545,7 +628,7 @@ export default function App() {
 
   const step = useCallback(() => {
     const currentTick = tickRef.current;
-    const next = simulateTick(agentsRef.current, brandRef.current, categoryRef.current, socialRef.current, currentTick, priceRef.current, availRef.current);
+    const next = simulateTick(agentsRef.current, brandRef.current, categoryRef.current, socialRef.current, currentTick, priceRef.current, availRef.current, channelRef.current, mmmRef.current);
     agentsRef.current = next;
     setAgents([...next]);
     const s = getStats(next);
@@ -570,8 +653,12 @@ export default function App() {
     setCategoryMods(result.categoryModifiers || {}); categoryRef.current = result.categoryModifiers || {};
     const newPE = result.priceEvents || [];
     const newAE = result.availabilityEvents || [];
+    const newCM = result.channelMods || {};
+    const newMS = result.mmmSeeds || {};
     setPriceEvents(newPE); priceRef.current = newPE;
     setAvailabilityEvents(newAE); availRef.current = newAE;
+    setChannelMods(newCM); channelRef.current = newCM;
+    setMmmSeeds(newMS); mmmRef.current = newMS;
     setActiveScenario(result.scenarioTitle || "Custom");
     setNarrative(result.narrative || "");
     setPrimaryEffect(result.primaryEffect || "mixed");
@@ -579,6 +666,7 @@ export default function App() {
     if (result.primaryEffect === "category_expansion" || result.primaryEffect === "category_contraction") setActiveChart("category");
     else if (result.primaryEffect === "consideration_shift") setActiveChart("funnel");
     else if (result.primaryEffect === "price_event") setActiveChart("params");
+    else if (result.primaryEffect === "channel_shift") setActiveChart("params");
     else setActiveChart("share");
   };
 
@@ -587,22 +675,24 @@ export default function App() {
     setCategoryMods({}); categoryRef.current = {};
     setPriceEvents([]); priceRef.current = [];
     setAvailabilityEvents([]); availRef.current = [];
+    setChannelMods({}); channelRef.current = {};
+    setMmmSeeds({}); mmmRef.current = {};
     setActiveScenario(null); setNarrative(""); setInsight(""); setPrimaryEffect(null);
   };
 
   const currentStats = history[history.length - 1] || {};
   const sortedBrands = [...BRANDS].sort((a, b) => (currentStats[b.id] || 0) - (currentStats[a.id] || 0));
 
-  const effectColors = { share_shift: "#E8A87C", category_expansion: "#6FCF97", category_contraction: "#EB5757", consideration_shift: "#56CCF2", price_event: "#F2C94C", mixed: "#BB6BD9" };
-  const effectLabel  = { share_shift: "Share Shift", category_expansion: "Category Expansion", category_contraction: "Category Contraction", consideration_shift: "Consideration Shift", price_event: "Price / Availability Event", mixed: "Mixed Effects" };
+  const effectColors = { share_shift: "#E8A87C", category_expansion: "#6FCF97", category_contraction: "#EB5757", consideration_shift: "#56CCF2", price_event: "#F2C94C", channel_shift: "#8E44AD", mixed: "#BB6BD9" };
+  const effectLabel  = { share_shift: "Share Shift", category_expansion: "Category Expansion", category_contraction: "Category Contraction", consideration_shift: "Consideration Shift", price_event: "Price / Availability Event", channel_shift: "Channel Mix Shift", mixed: "Mixed Effects" };
 
   const PRESETS = [
-    "Olay runs a 4-week 25% promotional price cut to drive trial in the mass tier",
-    "CeraVe gets a viral TikTok dermatologist endorsement, rapidly expanding awareness and salience",
+    "Olay doubles its TV broadcast spend to drive awareness in the mass tier",
+    "CeraVe shifts budget from broadcast to paid social — targeting ingredient nerds and clean beauty segments",
     "Neutrogena faces a 5-week supply chain disruption causing stockouts at major retailers",
-    "An economic downturn causes prestige buyers to trade down or exit the category",
-    "SkinCeuticals launches a limited-time 20% loyalty discount for repeat buyers",
-    "A clean beauty mega-trend pulls new consumers into prestige naturals",
+    "SkinCeuticals invests heavily in paid search to intercept in-market prestige shoppers",
+    "Our MMM shows Tatcha's social drives 60% of sales, search 30%, broadcast only 10%",
+    "An economic downturn causes prestige buyers to trade down — Olay runs a 4-week 20% promo",
   ];
 
   const top5 = sortedBrands.slice(0, 5);
@@ -661,7 +751,7 @@ export default function App() {
       {/* Header */}
       <div style={{padding:"24px 36px 18px",borderBottom:"1px solid #E0DDD6",background:"#FFFFFF",display:"flex",alignItems:"flex-end",justifyContent:"space-between"}}>
         <div>
-          <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#999",letterSpacing:".15em",marginBottom:5}}>MATERIAL+ INTELLIGENCE LAB · v4</div>
+          <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#999",letterSpacing:".15em",marginBottom:5}}>MATERIAL+ INTELLIGENCE LAB · v5</div>
           <h1 style={{fontSize:"clamp(18px,2.2vw,28px)",fontWeight:400,letterSpacing:"-.02em",lineHeight:1.1}}>
             Skincare Market<br/><span style={{fontStyle:"italic",color:"#C07A4A"}}>Consumer Simulation</span>
           </h1>
@@ -675,6 +765,9 @@ export default function App() {
           )}
           {activeAvailEvents.length > 0 && (
             <div style={{marginTop:2,fontSize:8,color:"#C0392B"}}>⚠ {activeAvailEvents.length} availability event{activeAvailEvents.length>1?"s":""} active</div>
+          )}
+          {Object.keys(channelMods).length > 0 && (
+            <div style={{marginTop:2,fontSize:8,color:"#8E44AD"}}>◈ channel mix overrides active</div>
           )}
           {activeScenario && primaryEffect && (
             <div style={{marginTop:5,padding:"3px 10px",background:"#FDF8F2",border:`1px solid ${effectColors[primaryEffect]}`,borderRadius:3,fontSize:9,color:effectColors[primaryEffect]}}>
@@ -809,6 +902,15 @@ export default function App() {
           {activeChart==="params" && (
             <div style={{marginBottom:20}} className="fade">
 
+              {/* Sub-tab switcher */}
+              <div style={{display:"flex",gap:5,marginBottom:14}}>
+                <button className={`tab${paramsSubTab==="params"?" on":""}`} onClick={()=>setParamsSubTab("params")} style={{fontSize:8}}>BRAND PARAMS</button>
+                <button className={`tab${paramsSubTab==="channels"?" on":""}`} onClick={()=>setParamsSubTab("channels")} style={{fontSize:8}}>CHANNEL MIX</button>
+              </div>
+
+              {/* ── BRAND PARAMS sub-tab ── */}
+              {paramsSubTab==="params" && (<>
+
               {/* Active events summary */}
               {(activePriceEvents.length > 0 || activeAvailEvents.length > 0 || pendingPriceEvents.length > 0 || pendingAvailEvents.length > 0) && (
                 <div style={{marginBottom:16,padding:"10px 12px",background:"#FFFDF7",border:"1px solid #E8DFC0",borderRadius:4}}>
@@ -914,6 +1016,94 @@ export default function App() {
               <div style={{marginTop:8,fontFamily:"'DM Mono',monospace",fontSize:7,color:"#BBB"}}>
                 Top row = current value · Bottom row (gray) = baseline · ▲▼ = delta from baseline
               </div>
+              </>)}
+
+              {/* ── CHANNELS sub-tab ── */}
+              {paramsSubTab==="channels" && (
+                <div>
+                  <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#888",letterSpacing:".12em",marginBottom:4}}>
+                    CHANNEL REACH BY BRAND — broadcast · search · social
+                  </div>
+                  <div style={{fontFamily:"'DM Sans',sans-serif",fontSize:10,color:"#AAA",marginBottom:12,lineHeight:1.5}}>
+                    Broadcast raises awareness broadly. Search lowers the consideration threshold for in-market agents. Social amplifies WOM — effect scales with segment receptivity.
+                    {Object.keys(channelMods).length > 0 && <span style={{color:"#8E44AD",marginLeft:6}}>⚡ scenario overrides active</span>}
+                  </div>
+
+                  {/* Channel bars per brand */}
+                  {BRANDS.map(b => {
+                    const reach    = getChannelReach(b, channelMods, mmmSeeds);
+                    const hasmod   = !!channelMods[b.id] || !!mmmSeeds[b.id];
+                    const maxBcast = 0.020; // scale reference
+                    const maxSrch  = 0.010;
+                    const maxSoc   = 0.010;
+                    return (
+                      <div key={b.id} style={{marginBottom:10}}>
+                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                          <span style={{fontFamily:"'DM Sans',sans-serif",fontSize:10,color:hasmod?"#8E44AD":"#444",display:"flex",alignItems:"center",gap:5}}>
+                            <span style={{width:6,height:6,borderRadius:"50%",background:b.color,display:"inline-block"}}/>
+                            {b.name}{hasmod&&" ⚡"}
+                          </span>
+                          <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#AAA"}}>
+                            {reach.broadcast.toFixed(4)} · {reach.search.toFixed(4)} · {reach.social.toFixed(4)}
+                          </span>
+                        </div>
+                        {[
+                          {label:"Broadcast",val:reach.broadcast,max:maxBcast,color:"#2980B9",base:b.mmm.broadcast},
+                          {label:"Search",   val:reach.search,   max:maxSrch, color:"#27AE60",base:b.mmm.search},
+                          {label:"Social",   val:reach.social,   max:maxSoc,  color:"#8E44AD",base:b.mmm.social},
+                        ].map(ch => {
+                          const pct     = Math.min(100, (ch.val / ch.max) * 100);
+                          const basePct = Math.min(100, (ch.base / ch.max) * 100);
+                          const changed = Math.abs(ch.val - ch.base) > 0.0001;
+                          return (
+                            <div key={ch.label} style={{display:"flex",alignItems:"center",gap:8,marginBottom:3}}>
+                              <div style={{width:54,fontFamily:"'DM Mono',monospace",fontSize:8,color:"#999",textAlign:"right"}}>{ch.label}</div>
+                              <div style={{flex:1,height:6,background:"#EAE8E2",borderRadius:3,overflow:"hidden",position:"relative"}}>
+                                {/* baseline ghost bar */}
+                                <div style={{position:"absolute",top:0,left:0,height:"100%",width:`${basePct}%`,background:ch.color,opacity:0.2,borderRadius:3}}/>
+                                {/* current bar */}
+                                <div className="bbar" style={{height:"100%",width:`${pct}%`,background:changed?"#8E44AD":ch.color,borderRadius:3,opacity:0.85}}/>
+                              </div>
+                              {changed && (
+                                <div style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:ch.val>ch.base?"#27AE60":"#C0392B",width:32,textAlign:"right"}}>
+                                  {ch.val>ch.base?"▲":"▼"}{((ch.val-ch.base)/ch.base*100).toFixed(0)}%
+                                </div>
+                              )}
+                              {!changed && <div style={{width:32}}/>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
+
+                  {/* Segment receptivity reference */}
+                  <div style={{marginTop:16,padding:"10px 12px",background:"#F7F6F3",border:"1px solid #E0DDD6",borderRadius:4}}>
+                    <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#BBB",letterSpacing:".1em",marginBottom:8}}>SOCIAL RECEPTIVITY BY SEGMENT</div>
+                    {SEGMENTS.map(s => {
+                      const pct = Math.round(s.socialReceptivity * 100);
+                      return (
+                        <div key={s.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                          <div style={{width:100,fontFamily:"'DM Sans',sans-serif",fontSize:9,color:"#666"}}>{s.label}</div>
+                          <div style={{flex:1,height:4,background:"#EAE8E2",borderRadius:2,overflow:"hidden"}}>
+                            <div style={{height:"100%",width:`${Math.min(100,pct/1.6*100)}%`,background:"#8E44AD",borderRadius:2,opacity:0.7}}/>
+                          </div>
+                          <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#888",width:28,textAlign:"right"}}>{s.socialReceptivity.toFixed(1)}×</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* MMM seeding instructions */}
+                  <div style={{marginTop:12,padding:"10px 12px",background:"#F2EEF8",border:"1px solid #C8B4E0",borderRadius:4}}>
+                    <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#8E44AD",letterSpacing:".1em",marginBottom:6}}>MMM SEEDING</div>
+                    <p style={{fontFamily:"'DM Sans',sans-serif",fontSize:10,color:"#555",lineHeight:1.5}}>
+                      To seed channel params from your MMM, describe it in the scenario lab — e.g. <em>"Our MMM shows Olay TV drives 55% of sales, search 25%, social 20%"</em>. The model will scale those proportions by the brand's total ad budget.
+                    </p>
+                  </div>
+                </div>
+              )}
+
             </div>
           )}
 
@@ -1008,7 +1198,7 @@ export default function App() {
         <div style={{padding:"24px 22px",background:"#FFFFFF",borderLeft:"1px solid #E0DDD6",overflowY:"auto"}}>
           <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"#999",letterSpacing:".15em",marginBottom:14}}>SCENARIO LAB</div>
           <p style={{fontFamily:"'DM Sans',sans-serif",fontSize:11,color:"#888",lineHeight:1.6,marginBottom:14}}>
-            Claude adjusts brand params, category rates, <em>price events</em>, and <em>availability events</em>. Price changes are time-limited; stockouts gate consideration sets.
+            Claude adjusts brand params, category rates, <em>price events</em>, <em>availability events</em>, and <em>channel mix</em>. Seed from MMM outputs by describing your share-of-effect data.
           </p>
 
           <textarea value={scenarioQuery} onChange={e=>setScenarioQuery(e.target.value)}
@@ -1048,8 +1238,8 @@ export default function App() {
             <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"#BBB",letterSpacing:".12em",marginBottom:8}}>MODEL ARCHITECTURE</div>
             {[
               {layer:"L1",label:"Category Participation",desc:"Dynamic m — tier entry/exit rates",color:"#27AE60"},
-              {layer:"L2",label:"Bass Awareness Diffusion",desc:"p (advertising) + q (WOM) → salience",color:"#C07A4A"},
-              {layer:"L3",label:"Consideration Filtering",desc:"Salience threshold + availability gate",color:"#2980B9"},
+              {layer:"L2",label:"Channel-Decomposed Reach",desc:"Broadcast · search · social (MMM-seedable)",color:"#C07A4A"},
+              {layer:"L3",label:"Consideration Filtering",desc:"Salience threshold · search nudge · avail gate",color:"#2980B9"},
               {layer:"L4",label:"Brand Choice (Softmax)",desc:"Utility over consideration set + price events",color:"#8E44AD"},
             ].map(l=>(
               <div key={l.layer} style={{display:"flex",gap:8,marginBottom:5,alignItems:"flex-start"}}>
